@@ -21,13 +21,14 @@ module Rack
 
     def call(env)
       status, headers, body = app.call(env)
+      path = env['REQUEST_PATH']
       unprocessed = [status, headers, body]
 
       return unprocessed unless predicate.call(env)
       return unprocessed unless headers["Content-Type"] && headers["Content-Type"].include?("text/html")
 
       ssi = Rack::SSIProcessor.new(env, logging && logger(env), processor_options)
-      new_body = ssi.process(body)
+      new_body = ssi.process(path, body)
       headers["Content-Length"] = (new_body.reduce(0) {|sum, part| sum + part.bytesize}).to_s
 
       [status, headers, new_body]

@@ -9,20 +9,20 @@ module Rack
       @options = options
     end
 
-    def process(body)
+    def process(path, body)
       # see http://wiki.nginx.org/HttpSsiModule
       # currently only supporting 'block' and 'include' directives
       blocks = {}
       output = []
       body.each do |part|
         new_part = process_block(part) {|name, content| blocks[name] = content}
-        output << process_include(new_part, blocks)
+        output << process_include(new_part, blocks, path)
       end
       output
     end
 
     def process_block(part)
-      part.gsub(/<!--\s?#\s?block\s+name="(\w+)"\s+-->(.*?)<!--\s?#\s+endblock\s+-->/) do
+      part.gsub(/<!--\s?#\s?block\s+name="(\w+)"\s+-->(.*?)<!--\s?#\s+endblock\s*-->/) do
         name, content = $1, $2
         _info "processing block directive with name=#{name}"
         yield [name, content]
@@ -30,11 +30,11 @@ module Rack
       end
     end
 
-    def process_include(part, blocks)
-      part.gsub(/<!--\s?#\s?include\s+(?:virtual|file)="([^"]+)"(?:\s+stub="(\w+)")?\s+-->/) do
+    def process_include(part, blocks, path)
+      part.gsub(/<!--\s?#\s?include\s+(?:virtual|file)="([^"]+)"(?:\s+stub="(\w+)")?\s*-->/) do
         location, stub = $1, $2
         _info "processing include directive with location=#{location}"
-        status, _, body = fetch location
+        status, _, body = fetch(location, path)
         if stub && (status != 200 || body.nil? || body == "")
           blocks[stub]
         else
@@ -43,13 +43,19 @@ module Rack
       end
     end
 
-    def fetch(location)
+    def fetch(location, path)
+      dir = ".#{path}"
+      dir = ::File.dirname(dir) unless ::File.directory? dir
+      dir = dir.sub(/^((\.$)|(\.\/+)|(\/+))/, '')
+      dir = '/' + dir unless /^\//.match dir
+      dir = dir + '/' unless /\/$/.match dir
+
       options[:locations].each do |pattern, host|
         next unless pattern === location
         target = if host.is_a?(Proc)
           host.call(location)
         else
-          "#{host}#{location}"
+          "#{host}#{dir}#{location}"
         end
         return _get(target)
       end
